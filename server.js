@@ -1,385 +1,412 @@
-// ==========================================================================
-//  Kenya Campus Tour - Crown Awards  |  Backend Server
-//  - Express + lowdb (JSON) - no native builds (works on Render free plan)
-//  - KCB Buni STK Push integration
-//  - Professional admin panel served from /public
-// ==========================================================================
+/**
+ * DevaBlueForex Backend Server
+ * Pure JS storage (lowdb) — no native compilation required.
+ * Render.com deploy-safe (no better-sqlite3 / node-gyp).
+ */
+
 require('dotenv').config();
+const express = require('express');
+const cors = require('cors');
+const bcrypt = require('bcryptjs');
+const jwt = require('jsonwebtoken');
+const helmet = require('helmet');
+const compression = require('compression');
+const morgan = require('morgan');
+const rateLimit = require('express-rate-limit');
+const path = require('path');
+const fs = require('fs');
+const { v4: uuidv4 } = require('uuid');
+const low = require('lowdb');
+const FileSync = require('lowdb/adapters/FileSync');
 
-const express      = require('express');
-const cors         = require('cors');
-const bodyParser   = require('body-parser');
-const session      = require('express-session');
-const helmet       = require('helmet');
-const morgan       = require('morgan');
-const path         = require('path');
-const { v4: uuid } = require('uuid');
-
-const db           = require('./db');
-const kcb          = require('./kcb');
-const universities = require('./data/universities');
-const categories   = require('./data/categories');
-
-const app  = express();
+const app = express();
 const PORT = process.env.PORT || 10000;
+const JWT_SECRET = process.env.JWT_SECRET || 'devablueforex_secret_2026';
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || '11devablue72';
 
-// ---------- Middleware ----------
-app.use(helmet({ contentSecurityPolicy: false }));
-app.use(cors({ origin: true, credentials: true }));
-app.use(bodyParser.json({ limit: '2mb' }));
-app.use(bodyParser.urlencoded({ extended: true }));
+// ---------- DATA STORE ----------
+const DATA_DIR = path.join(__dirname, 'data');
+if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
+
+const adapter = new FileSync(path.join(DATA_DIR, 'db.json'));
+const db = low(adapter);
+
+db.defaults({
+  users: [],
+  signals: [],
+  courses: [],
+  bookings: [],
+  payments: [],
+  testimonials: [],
+  announcements: [],
+  sessions: [],
+  loginLogs: []
+}).write();
+
+// Seed default courses if empty
+if (db.get('courses').size().value() === 0) {
+  db.set('courses', [
+    {
+      id: uuidv4(),
+      title: 'Master Sniper Entry',
+      subtitle: 'The complete system for precision market entries',
+      price: 299,
+      features: ['48-Page Comprehensive Guide', 'Institutional Entry Models', 'Lifetime Access', 'Private Community', 'Weekly Live Sessions'],
+      badge: 'BESTSELLER',
+      icon: '🎯'
+    },
+    {
+      id: uuidv4(),
+      title: 'In-Person Masterclass',
+      subtitle: 'Learn the exact trading systems used by Deva Blue',
+      price: 500,
+      features: ['Hands-on training', 'Direct mentorship', 'Networking opportunities', 'Certificate of completion', 'Lifetime replays'],
+      badge: 'PREMIUM',
+      icon: '💎'
+    },
+    {
+      id: uuidv4(),
+      title: 'Session Booking',
+      subtitle: 'Flexible 1-hour sessions for strategy tuning',
+      price: 50,
+      features: ['Flexible scheduling', 'Live chart analysis', 'Personalized guidance', 'Recording provided', '7-day follow-up'],
+      badge: 'FLEXIBLE',
+      icon: '📊'
+    },
+    {
+      id: uuidv4(),
+      title: 'VIP Signal Membership',
+      subtitle: 'Real-time premium signals delivered to your device',
+      price: 149,
+      features: ['Daily signals', '85%+ accuracy', 'Risk management', 'Telegram + WhatsApp alerts', 'Monthly performance report'],
+      badge: 'HOT',
+      icon: '⚡'
+    }
+  ]).write();
+}
+
+if (db.get('signals').size().value() === 0) {
+  db.set('signals', [
+    { id: uuidv4(), pair: 'XAU/USD', direction: 'BUY', entry: 2385.50, sl: 2380.00, tp: 2400.00, status: 'ACTIVE', posted: new Date().toISOString(), analyst: 'Deva Blue' },
+    { id: uuidv4(), pair: 'EUR/USD', direction: 'SELL', entry: 1.0854, sl: 1.0880, tp: 1.0800, status: 'ACTIVE', posted: new Date().toISOString(), analyst: 'Deva Blue' },
+    { id: uuidv4(), pair: 'GBP/JPY', direction: 'BUY', entry: 198.45, sl: 197.80, tp: 199.80, status: 'HIT TP', posted: new Date(Date.now() - 86400000).toISOString(), analyst: 'Deva Blue' }
+  ]).write();
+}
+
+if (db.get('testimonials').size().value() === 0) {
+  db.set('testimonials', [
+    { id: uuidv4(), name: 'Michael K.', text: 'DevaBlueForex changed my trading forever. The sniper entries are surgical.', rating: 5, posted: new Date().toISOString() },
+    { id: uuidv4(), name: 'Sarah L.', text: 'From losing streaks to consistent profits in 3 months. Deva is the real deal.', rating: 5, posted: new Date().toISOString() },
+    { id: uuidv4(), name: 'James O.', text: 'The mentorship is worth 10x the price. Best investment of my life.', rating: 5, posted: new Date().toISOString() }
+  ]).write();
+}
+
+// ---------- MIDDLEWARE ----------
+app.set('trust proxy', 1);
+app.use(helmet({ contentSecurityPolicy: false, crossOriginResourcePolicy: false }));
+app.use(compression());
 app.use(morgan('tiny'));
-app.use(session({
-  secret: process.env.SESSION_SECRET || 'kenya-campus-tour-secret-change-me',
-  resave: false,
-  saveUninitialized: false,
-  cookie: { maxAge: 1000 * 60 * 60 * 8 }   // 8h
-}));
+app.use(cors({ origin: '*', credentials: true }));
+app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({ extended: true }));
 
-// Serve the admin panel and any static assets from /public
-app.use('/admin',  express.static(path.join(__dirname, 'public', 'admin')));
-app.use('/public', express.static(path.join(__dirname, 'public')));
+const authLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 20, standardHeaders: true });
+const apiLimiter = rateLimit({ windowMs: 60 * 1000, max: 120 });
+app.use('/api/', apiLimiter);
 
-// ==========================================================================
-//  PUBLIC API
-// ==========================================================================
+// ---------- AUTH HELPERS ----------
+function signToken(user) {
+  return jwt.sign({ id: user.id, email: user.email, role: user.role || 'user' }, JWT_SECRET, { expiresIn: '7d' });
+}
 
-// Health
-app.get('/', (_req, res) => res.json({
-  service: 'Kenya Campus Tour Crown Awards API',
-  status:  'online',
-  time:    new Date().toISOString()
-}));
+function authRequired(req, res, next) {
+  const header = req.headers.authorization || '';
+  const token = header.startsWith('Bearer ') ? header.slice(7) : null;
+  if (!token) return res.status(401).json({ error: 'No token provided' });
+  try {
+    req.user = jwt.verify(token, JWT_SECRET);
+    next();
+  } catch {
+    res.status(401).json({ error: 'Invalid or expired token' });
+  }
+}
 
-// Get reference data
-app.get('/api/universities', (_req, res) => res.json(universities));
-app.get('/api/categories',   (_req, res) => res.json(categories));
+function adminRequired(req, res, next) {
+  const header = req.headers.authorization || '';
+  const token = header.startsWith('Bearer ') ? header.slice(7) : null;
+  if (!token) return res.status(401).json({ error: 'No admin token' });
+  try {
+    const payload = jwt.verify(token, JWT_SECRET);
+    if (payload.role !== 'admin') return res.status(403).json({ error: 'Admin only' });
+    req.admin = payload;
+    next();
+  } catch {
+    res.status(401).json({ error: 'Invalid admin token' });
+  }
+}
 
-// Get settings (with days-left computation)
-app.get('/api/settings', (_req, res) => {
-  const s = db.get('settings').value();
-  const start = new Date(s.registrationStartDate);
-  const elapsed = Math.floor((Date.now() - start.getTime()) / (1000 * 60 * 60 * 24));
-  const daysLeft = Math.max(0, s.registrationDaysTotal - elapsed);
-  res.json({
-    ...s,
-    daysLeft,
-    registrationOpen: s.registrationOpen && daysLeft > 0
-  });
+// ---------- HEALTH ----------
+app.get('/', (req, res) => res.json({ status: 'DevaBlueForex API running', version: '1.0.0', time: new Date().toISOString() }));
+app.get('/api/health', (req, res) => res.json({ ok: true, service: 'devablueforex-backend', uptime: process.uptime() }));
+
+// ---------- AUTH ROUTES ----------
+app.post('/api/auth/register', authLimiter, async (req, res) => {
+  try {
+    const { name, email, password, phone } = req.body;
+    if (!name || !email || !password) return res.status(400).json({ error: 'Missing required fields' });
+    if (password.length < 6) return res.status(400).json({ error: 'Password must be at least 6 characters' });
+
+    const exists = db.get('users').find({ email: email.toLowerCase() }).value();
+    if (exists) return res.status(409).json({ error: 'Email already registered' });
+
+    const hash = await bcrypt.hash(password, 10);
+    const user = {
+      id: uuidv4(),
+      name,
+      email: email.toLowerCase(),
+      phone: phone || '',
+      password: hash,
+      role: 'user',
+      verified: true,
+      createdAt: new Date().toISOString(),
+      balance: 0,
+      subscription: null
+    };
+    db.get('users').push(user).write();
+    db.get('loginLogs').push({ id: uuidv4(), userId: user.id, email: user.email, action: 'register', at: new Date().toISOString(), ip: req.ip }).write();
+
+    const token = signToken(user);
+    res.json({ token, user: { id: user.id, name: user.name, email: user.email, role: user.role } });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Registration failed' });
+  }
 });
 
-// List nominees, optionally filter by category
-app.get('/api/nominees', (req, res) => {
-  const { category } = req.query;
-  let q = db.get('nominees');
-  if (category) q = q.filter({ category });
-  const list = q.value()
-    .slice()
-    .sort((a, b) => (b.votes || 0) - (a.votes || 0));
+app.post('/api/auth/login', authLimiter, async (req, res) => {
+  try {
+    const { email, password } = req.body;
+    if (!email || !password) return res.status(400).json({ error: 'Email and password required' });
+
+    const user = db.get('users').find({ email: email.toLowerCase() }).value();
+    if (!user) return res.status(401).json({ error: 'Invalid credentials' });
+
+    const ok = await bcrypt.compare(password, user.password);
+    if (!ok) return res.status(401).json({ error: 'Invalid credentials' });
+
+    db.get('loginLogs').push({ id: uuidv4(), userId: user.id, email: user.email, action: 'login', at: new Date().toISOString(), ip: req.ip }).write();
+
+    const token = signToken(user);
+    res.json({ token, user: { id: user.id, name: user.name, email: user.email, role: user.role, phone: user.phone, balance: user.balance, subscription: user.subscription } });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Login failed' });
+  }
+});
+
+app.post('/api/auth/logout', authRequired, (req, res) => {
+  db.get('loginLogs').push({ id: uuidv4(), userId: req.user.id, email: req.user.email, action: 'logout', at: new Date().toISOString(), ip: req.ip }).write();
+  res.json({ ok: true, message: 'Logged out' });
+});
+
+app.get('/api/auth/me', authRequired, (req, res) => {
+  const user = db.get('users').find({ id: req.user.id }).value();
+  if (!user) return res.status(404).json({ error: 'User not found' });
+  const { password, ...safe } = user;
+  res.json({ user: safe });
+});
+
+app.post('/api/auth/refresh', authRequired, (req, res) => {
+  const user = db.get('users').find({ id: req.user.id }).value();
+  if (!user) return res.status(404).json({ error: 'User not found' });
+  const token = signToken(user);
+  res.json({ token });
+});
+
+// ---------- PUBLIC DATA ----------
+app.get('/api/courses', (req, res) => res.json(db.get('courses').value()));
+app.get('/api/testimonials', (req, res) => res.json(db.get('testimonials').value()));
+app.get('/api/announcements', (req, res) => res.json(db.get('announcements').value()));
+
+app.get('/api/signals', authRequired, (req, res) => {
+  res.json(db.get('signals').orderBy('posted', 'desc').value());
+});
+
+// Public preview (limited)
+app.get('/api/signals/preview', (req, res) => {
+  const preview = db.get('signals').take(2).value().map(s => ({ pair: s.pair, direction: s.direction, status: s.status, posted: s.posted }));
+  res.json(preview);
+});
+
+// ---------- BOOKINGS ----------
+app.post('/api/bookings', authRequired, (req, res) => {
+  const { courseId, date, notes } = req.body;
+  const course = db.get('courses').find({ id: courseId }).value();
+  if (!course) return res.status(404).json({ error: 'Course not found' });
+
+  const booking = {
+    id: uuidv4(),
+    userId: req.user.id,
+    userEmail: req.user.email,
+    courseId,
+    courseTitle: course.title,
+    price: course.price,
+    date: date || new Date().toISOString(),
+    notes: notes || '',
+    status: 'PENDING',
+    createdAt: new Date().toISOString()
+  };
+  db.get('bookings').push(booking).write();
+  res.json({ ok: true, booking });
+});
+
+app.get('/api/bookings/mine', authRequired, (req, res) => {
+  const list = db.get('bookings').filter({ userId: req.user.id }).orderBy('createdAt', 'desc').value();
   res.json(list);
 });
 
-// Register a nominee
-app.post('/api/nominees', (req, res) => {
-  const s = db.get('settings').value();
-  const start = new Date(s.registrationStartDate);
-  const elapsed = Math.floor((Date.now() - start.getTime()) / (1000 * 60 * 60 * 24));
-  const daysLeft = Math.max(0, s.registrationDaysTotal - elapsed);
-
-  if (!s.registrationOpen || daysLeft <= 0) {
-    return res.status(403).json({ error: 'Registration is currently closed.' });
-  }
-
-  const { name, email, phone, location, university, category } = req.body || {};
-  if (!name || !email || !phone || !location || !category) {
-    return res.status(400).json({ error: 'Please fill in all required fields.' });
-  }
-  const cat = categories.find(c => c.id === category);
-  if (!cat) return res.status(400).json({ error: 'Invalid category selected.' });
-  if (cat.requiresUniversity && !university) {
-    return res.status(400).json({ error: `Please specify a university for "${cat.name}".` });
-  }
-
-  // Enforce cap of 20 per category
-  const MAX = parseInt(process.env.MAX_NOMINEES_PER_CATEGORY || '20', 10);
-  const existingCount = db.get('nominees').filter({ category }).size().value();
-  if (existingCount >= MAX) {
-    return res.status(409).json({
-      error: `Sorry, this category is full (max ${MAX} nominees).`,
-      full: true
-    });
-  }
-
-  // Prevent duplicates (same email + category)
-  const dup = db.get('nominees').find({ email: email.toLowerCase().trim(), category }).value();
-  if (dup) return res.status(409).json({ error: 'You have already registered in this category.' });
-
-  const nominee = {
-    id: uuid(),
-    name:       String(name).trim(),
-    email:      String(email).toLowerCase().trim(),
-    phone:      String(phone).trim(),
-    location:   String(location).trim(),
-    university: university ? String(university).trim() : '',
-    category,
-    votes: 0,
+// ---------- PAYMENTS ----------
+app.post('/api/payments', authRequired, (req, res) => {
+  const { amount, method, reference, courseId } = req.body;
+  const payment = {
+    id: uuidv4(),
+    userId: req.user.id,
+    userEmail: req.user.email,
+    amount,
+    method: method || 'M-Pesa',
+    reference: reference || '',
+    courseId: courseId || null,
+    status: 'PENDING',
     createdAt: new Date().toISOString()
   };
-  db.get('nominees').push(nominee).write();
-  res.json({ success: true, nominee });
+  db.get('payments').push(payment).write();
+  res.json({ ok: true, payment });
 });
 
-// Initiate a vote (triggers STK push)
-app.post('/api/vote', async (req, res) => {
-  const s = db.get('settings').value();
-  if (!s.votingActive) return res.status(403).json({ error: 'Voting is not active right now.' });
+app.get('/api/payments/mine', authRequired, (req, res) => {
+  const list = db.get('payments').filter({ userId: req.user.id }).orderBy('createdAt', 'desc').value();
+  res.json(list);
+});
 
-  const { nomineeId, votes, phone } = req.body || {};
-  const nominee = db.get('nominees').find({ id: nomineeId }).value();
-  if (!nominee) return res.status(404).json({ error: 'Nominee not found.' });
+// ---------- MARKET DATA (mock live) ----------
+app.get('/api/market/live', (req, res) => {
+  const rand = (base, range) => (base + (Math.random() - 0.5) * range).toFixed(4);
+  res.json([
+    { pair: 'EUR/USD', bid: rand(1.0850, 0.005), ask: rand(1.0852, 0.005), change: (Math.random() * 2 - 1).toFixed(2) + '%' },
+    { pair: 'GBP/USD', bid: rand(1.2745, 0.008), ask: rand(1.2747, 0.008), change: (Math.random() * 2 - 1).toFixed(2) + '%' },
+    { pair: 'XAU/USD', bid: rand(2385.5, 5), ask: rand(2385.9, 5), change: (Math.random() * 2 - 1).toFixed(2) + '%' },
+    { pair: 'USD/JPY', bid: rand(154.32, 0.5), ask: rand(154.34, 0.5), change: (Math.random() * 2 - 1).toFixed(2) + '%' },
+    { pair: 'BTC/USD', bid: rand(68450, 500), ask: rand(68470, 500), change: (Math.random() * 4 - 2).toFixed(2) + '%' }
+  ]);
+});
 
-  const amt = parseInt(votes, 10);
-  if (!amt || amt < 10 || amt > 1000) {
-    return res.status(400).json({ error: 'Vote amount must be between KES 10 and KES 1,000.' });
-  }
-  if (!phone) return res.status(400).json({ error: 'Phone number is required.' });
+// ---------- ADMIN AUTH ----------
+app.post('/api/admin/login', authLimiter, (req, res) => {
+  const { password } = req.body;
+  if (!password) return res.status(400).json({ error: 'Password required' });
+  if (password !== ADMIN_PASSWORD) return res.status(401).json({ error: 'Invalid admin password' });
+  const token = jwt.sign({ id: 'admin-root', email: 'admin@devablueforex.com', role: 'admin' }, JWT_SECRET, { expiresIn: '12h' });
+  db.get('loginLogs').push({ id: uuidv4(), userId: 'admin-root', email: 'admin', action: 'admin-login', at: new Date().toISOString(), ip: req.ip }).write();
+  res.json({ token, admin: true });
+});
 
-  // Short, alphanumeric reference (KCB requires this)
-  const refShort = nominee.name.replace(/[^A-Za-z0-9]/g, '').substring(0, 12) || 'VOTE';
-
-  const result = await kcb.stkPush({
-    phone,
-    amount: amt,
-    reference: refShort,
-    description: `Vote ${nominee.name}`
-  });
-
-  const record = {
-    id: uuid(),
-    nomineeId,
-    nomineeName: nominee.name,
-    category:    nominee.category,
-    amount:      amt,
-    phone:       kcb.formatPhone(phone),
-    status:      result.success ? 'PENDING' : 'FAILED',
-    // KCB response is nested under data.response
-    checkoutRequestID: result.data ? ((result.data.response && result.data.response.CheckoutRequestID) || result.data.CheckoutRequestID || result.data.checkoutRequestID || null) : null,
-    merchantRequestID: result.data ? ((result.data.response && result.data.response.MerchantRequestID) || result.data.MerchantRequestID || result.data.merchantRequestID || null) : null,
-    rawResponse: result.data || result.response,
-    error:       result.success ? null : (result.error || 'STK request failed'),
-    createdAt:   new Date().toISOString()
-  };
-  db.get('votes').push(record).write();
-
-  if (!result.success) {
-    return res.status(502).json({
-      error: 'STK push failed. Please try again.',
-      details: result.response || result.error,
-      voteId: record.id
-    });
-  }
+// ---------- ADMIN ROUTES ----------
+app.get('/api/admin/stats', adminRequired, (req, res) => {
   res.json({
-    success: true,
-    message: 'STK push sent - enter your M-PESA/KCB PIN on your phone.',
-    voteId: record.id,
-    checkoutRequestID: record.checkoutRequestID
+    users: db.get('users').size().value(),
+    signals: db.get('signals').size().value(),
+    bookings: db.get('bookings').size().value(),
+    payments: db.get('payments').size().value(),
+    revenue: db.get('payments').filter({ status: 'CONFIRMED' }).map('amount').value().reduce((a, b) => a + b, 0),
+    logins24h: db.get('loginLogs').filter(l => (Date.now() - new Date(l.at).getTime()) < 86400000).size().value()
   });
 });
 
-// Polling endpoint - frontend checks vote status
-app.get('/api/vote/:voteId', (req, res) => {
-  const v = db.get('votes').find({ id: req.params.voteId }).value();
-  if (!v) return res.status(404).json({ error: 'Vote not found' });
-  res.json({ status: v.status, amount: v.amount, nomineeName: v.nomineeName });
+app.get('/api/admin/users', adminRequired, (req, res) => {
+  const users = db.get('users').value().map(({ password, ...u }) => u);
+  res.json(users);
 });
 
-// ==========================================================================
-//  KCB CALLBACK
-// ==========================================================================
-app.post('/callback', (req, res) => {
-  console.log('[KCB CALLBACK]', JSON.stringify(req.body));
-  db.get('transactions').push({
-    id: uuid(),
-    body: req.body,
-    receivedAt: new Date().toISOString()
-  }).write();
-
-  try {
-    const body = req.body || {};
-    // KCB Buni callback shapes vary - handle common ones
-    const stk = body.Body && body.Body.stkCallback ? body.Body.stkCallback : body;
-    const resultCode = stk.ResultCode !== undefined ? stk.ResultCode : (stk.resultCode !== undefined ? stk.resultCode : (body.resultCode !== undefined ? body.resultCode : null));
-    const checkoutRequestID = stk.CheckoutRequestID || stk.checkoutRequestID || body.CheckoutRequestID || body.checkoutRequestID || body.merchantRequestID || null;
-    const transactionId = (stk.CallbackMetadata && stk.CallbackMetadata.Item)
-      ? (stk.CallbackMetadata.Item.find(i => i.Name === 'MpesaReceiptNumber') || {}).Value
-      : (body.transactionId || body.mpesaReceiptNumber || null);
-
-    if (checkoutRequestID) {
-      const vote = db.get('votes').find({ checkoutRequestID }).value();
-      if (vote) {
-        if (Number(resultCode) === 0) {
-          // SUCCESS
-          db.get('votes').find({ id: vote.id })
-            .assign({ status: 'SUCCESS', transactionId: transactionId || null, completedAt: new Date().toISOString() })
-            .write();
-
-          // Increment nominee votes (1 KES == 1 vote)
-          db.get('nominees').find({ id: vote.nomineeId })
-            .update('votes', v => (v || 0) + vote.amount)
-            .write();
-
-          // Update settings wallet
-          db.get('settings')
-            .update('walletBalance', v => (v || 0) + vote.amount)
-            .update('totalSuccessfulVotes', v => (v || 0) + 1)
-            .write();
-
-          // Update voter aggregate
-          const voter = db.get('voters').find({ phone: vote.phone }).value();
-          if (voter) {
-            db.get('voters').find({ phone: vote.phone })
-              .assign({
-                totalVotes:  (voter.totalVotes  || 0) + vote.amount,
-                totalAmount: (voter.totalAmount || 0) + vote.amount,
-                lastVoteAt:  new Date().toISOString()
-              }).write();
-          } else {
-            db.get('voters').push({
-              phone: vote.phone,
-              totalVotes: vote.amount,
-              totalAmount: vote.amount,
-              lastVoteAt: new Date().toISOString()
-            }).write();
-          }
-        } else {
-          db.get('votes').find({ id: vote.id })
-            .assign({ status: 'FAILED', failureReason: stk.ResultDesc || stk.resultDesc || 'Payment failed', completedAt: new Date().toISOString() })
-            .write();
-        }
-      }
-    }
-  } catch (e) {
-    console.error('Callback processing error:', e);
-  }
-  res.json({ ResultCode: 0, ResultDesc: 'Accepted' });
+app.delete('/api/admin/users/:id', adminRequired, (req, res) => {
+  db.get('users').remove({ id: req.params.id }).write();
+  res.json({ ok: true });
 });
 
-// ==========================================================================
-//  ADMIN AUTH + API
-// ==========================================================================
-function requireAdmin(req, res, next) {
-  if (req.session && req.session.admin) return next();
-  return res.status(401).json({ error: 'Unauthorized' });
-}
-
-app.post('/api/admin/login', (req, res) => {
-  const { username, password } = req.body || {};
-  if (username === (process.env.ADMIN_USERNAME || 'admin') &&
-      password === (process.env.ADMIN_PASSWORD || 'admin123')) {
-    req.session.admin = username;
-    return res.json({ success: true });
-  }
-  res.status(401).json({ error: 'Invalid credentials' });
+app.get('/api/admin/signals', adminRequired, (req, res) => res.json(db.get('signals').value()));
+app.post('/api/admin/signals', adminRequired, (req, res) => {
+  const signal = { id: uuidv4(), ...req.body, posted: new Date().toISOString() };
+  db.get('signals').push(signal).write();
+  res.json(signal);
+});
+app.put('/api/admin/signals/:id', adminRequired, (req, res) => {
+  db.get('signals').find({ id: req.params.id }).assign(req.body).write();
+  res.json({ ok: true });
+});
+app.delete('/api/admin/signals/:id', adminRequired, (req, res) => {
+  db.get('signals').remove({ id: req.params.id }).write();
+  res.json({ ok: true });
 });
 
-app.post('/api/admin/logout', (req, res) => {
-  req.session.destroy(() => res.json({ success: true }));
+app.get('/api/admin/courses', adminRequired, (req, res) => res.json(db.get('courses').value()));
+app.post('/api/admin/courses', adminRequired, (req, res) => {
+  const course = { id: uuidv4(), ...req.body };
+  db.get('courses').push(course).write();
+  res.json(course);
+});
+app.put('/api/admin/courses/:id', adminRequired, (req, res) => {
+  db.get('courses').find({ id: req.params.id }).assign(req.body).write();
+  res.json({ ok: true });
+});
+app.delete('/api/admin/courses/:id', adminRequired, (req, res) => {
+  db.get('courses').remove({ id: req.params.id }).write();
+  res.json({ ok: true });
 });
 
-app.get('/api/admin/me', (req, res) => {
-  if (req.session && req.session.admin) return res.json({ authenticated: true, user: req.session.admin });
-  res.status(401).json({ authenticated: false });
+app.get('/api/admin/bookings', adminRequired, (req, res) => res.json(db.get('bookings').orderBy('createdAt', 'desc').value()));
+app.put('/api/admin/bookings/:id', adminRequired, (req, res) => {
+  db.get('bookings').find({ id: req.params.id }).assign(req.body).write();
+  res.json({ ok: true });
 });
 
-// Dashboard stats
-app.get('/api/admin/stats', requireAdmin, (_req, res) => {
-  const nominees = db.get('nominees').value();
-  const votes    = db.get('votes').value();
-  const s        = db.get('settings').value();
-  const start    = new Date(s.registrationStartDate);
-  const elapsed  = Math.floor((Date.now() - start.getTime()) / (1000 * 60 * 60 * 24));
-  const daysLeft = Math.max(0, s.registrationDaysTotal - elapsed);
-
-  res.json({
-    totalNominees:   nominees.length,
-    totalCategories: categories.length,
-    totalVotesCast:  nominees.reduce((sum, n) => sum + (n.votes || 0), 0),
-    successfulTx:    votes.filter(v => v.status === 'SUCCESS').length,
-    pendingTx:       votes.filter(v => v.status === 'PENDING').length,
-    failedTx:        votes.filter(v => v.status === 'FAILED').length,
-    walletBalance:   s.walletBalance,
-    daysLeft,
-    registrationOpen: s.registrationOpen && daysLeft > 0,
-    votingActive:     s.votingActive
-  });
+app.get('/api/admin/payments', adminRequired, (req, res) => res.json(db.get('payments').orderBy('createdAt', 'desc').value()));
+app.put('/api/admin/payments/:id', adminRequired, (req, res) => {
+  db.get('payments').find({ id: req.params.id }).assign(req.body).write();
+  res.json({ ok: true });
 });
 
-// Nominee management
-app.get('/api/admin/nominees', requireAdmin, (_req, res) => {
-  res.json(db.get('nominees').value());
+app.get('/api/admin/testimonials', adminRequired, (req, res) => res.json(db.get('testimonials').value()));
+app.post('/api/admin/testimonials', adminRequired, (req, res) => {
+  const t = { id: uuidv4(), ...req.body, posted: new Date().toISOString() };
+  db.get('testimonials').push(t).write();
+  res.json(t);
+});
+app.delete('/api/admin/testimonials/:id', adminRequired, (req, res) => {
+  db.get('testimonials').remove({ id: req.params.id }).write();
+  res.json({ ok: true });
 });
 
-app.delete('/api/admin/nominees/:id', requireAdmin, (req, res) => {
-  db.get('nominees').remove({ id: req.params.id }).write();
-  res.json({ success: true });
+app.get('/api/admin/announcements', adminRequired, (req, res) => res.json(db.get('announcements').value()));
+app.post('/api/admin/announcements', adminRequired, (req, res) => {
+  const a = { id: uuidv4(), ...req.body, posted: new Date().toISOString() };
+  db.get('announcements').push(a).write();
+  res.json(a);
+});
+app.delete('/api/admin/announcements/:id', adminRequired, (req, res) => {
+  db.get('announcements').remove({ id: req.params.id }).write();
+  res.json({ ok: true });
 });
 
-app.post('/api/admin/nominees/:id/add-votes', requireAdmin, (req, res) => {
-  const add = parseInt(req.body.votes, 10) || 0;
-  if (add === 0) return res.status(400).json({ error: 'Vote count required' });
-  const n = db.get('nominees').find({ id: req.params.id }).value();
-  if (!n) return res.status(404).json({ error: 'Not found' });
-  db.get('nominees').find({ id: req.params.id })
-    .update('votes', v => Math.max(0, (v || 0) + add))
-    .write();
-  res.json({ success: true, nominee: db.get('nominees').find({ id: req.params.id }).value() });
+app.get('/api/admin/logs', adminRequired, (req, res) => {
+  res.json(db.get('loginLogs').orderBy('at', 'desc').take(200).value());
 });
 
-// Voters / voters info
-app.get('/api/admin/voters', requireAdmin, (_req, res) => {
-  res.json(db.get('voters').value());
+// ---------- ERROR HANDLER ----------
+app.use((err, req, res, next) => {
+  console.error(err);
+  res.status(500).json({ error: 'Internal server error' });
 });
 
-// All votes/transactions
-app.get('/api/admin/votes', requireAdmin, (_req, res) => {
-  res.json(db.get('votes').value().slice().reverse());
-});
-
-app.get('/api/admin/transactions', requireAdmin, (_req, res) => {
-  res.json(db.get('transactions').value().slice().reverse());
-});
-
-// Settings management
-app.get('/api/admin/settings', requireAdmin, (_req, res) => {
-  res.json(db.get('settings').value());
-});
-
-app.put('/api/admin/settings', requireAdmin, (req, res) => {
-  const { registrationDaysTotal, registrationStartDate, votingActive, registrationOpen, walletBalance } = req.body || {};
-  const patch = {};
-  if (registrationDaysTotal !== undefined) patch.registrationDaysTotal = parseInt(registrationDaysTotal, 10);
-  if (registrationStartDate !== undefined) patch.registrationStartDate = new Date(registrationStartDate).toISOString();
-  if (votingActive !== undefined)          patch.votingActive          = !!votingActive;
-  if (registrationOpen !== undefined)      patch.registrationOpen      = !!registrationOpen;
-  if (walletBalance !== undefined)         patch.walletBalance         = parseFloat(walletBalance);
-  db.get('settings').assign(patch).write();
-  res.json({ success: true, settings: db.get('settings').value() });
-});
-
-app.post('/api/admin/settings/reset-days', requireAdmin, (req, res) => {
-  const days = parseInt(req.body.days, 10) || 30;
-  db.get('settings').assign({
-    registrationDaysTotal: days,
-    registrationStartDate: new Date().toISOString(),
-    registrationOpen: true
-  }).write();
-  res.json({ success: true, settings: db.get('settings').value() });
-});
-
-// ---------- Start ----------
 app.listen(PORT, () => {
-  console.log(`\n🎓 Kenya Campus Tour Crown Awards - Backend running on port ${PORT}`);
-  console.log(`   Public API:  http://localhost:${PORT}`);
-  console.log(`   Admin Panel: http://localhost:${PORT}/admin`);
-  console.log(`   Callback:    ${process.env.KCB_CALLBACK_URL}`);
+  console.log(`✅ DevaBlueForex backend running on port ${PORT}`);
+  console.log(`   Admin password: ${ADMIN_PASSWORD}`);
 });
