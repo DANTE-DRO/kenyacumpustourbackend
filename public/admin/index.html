@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>KCT Crown Awards - Admin Panel</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=Playfair+Display:wght@700;900&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+<link rel="stylesheet" href="admin.css">
+</head>
+<body>
+
+<!-- ============ LOGIN SCREEN ============ -->
+<div id="loginScreen" class="login-screen">
+  <div class="login-bg">
+    <div class="orb orb1"></div><div class="orb orb2"></div><div class="orb orb3"></div>
+  </div>
+  <div class="login-card">
+    <div class="login-crown"><i class="fas fa-crown"></i></div>
+    <h1>KCT Crown Awards</h1>
+    <p class="subtitle">Admin Control Panel</p>
+    <form id="loginForm">
+      <div class="input-group">
+        <i class="fas fa-user"></i>
+        <input type="text" id="username" placeholder="Username" required autocomplete="username">
+      </div>
+      <div class="input-group">
+        <i class="fas fa-lock"></i>
+        <input type="password" id="password" placeholder="Password" required autocomplete="current-password">
+      </div>
+      <button type="submit" class="btn-primary">
+        <span>Sign In</span><i class="fas fa-arrow-right"></i>
+      </button>
+      <p class="login-error" id="loginError"></p>
+    </form>
+    <div class="login-footer">© 2026 Kenya Campus Tour</div>
+  </div>
+</div>
+
+<!-- ============ APP ============ -->
+<div id="app" class="app hidden">
+  <!-- SIDEBAR -->
+  <aside class="sidebar">
+    <div class="brand">
+      <div class="brand-icon"><i class="fas fa-crown"></i></div>
+      <div>
+        <div class="brand-name">KCT Awards</div>
+        <div class="brand-sub">Admin Panel</div>
+      </div>
+    </div>
+    <nav class="menu">
+      <a class="menu-item active" data-page="dashboard"><i class="fas fa-chart-line"></i> Dashboard</a>
+      <a class="menu-item" data-page="nominees"><i class="fas fa-users"></i> Nominees</a>
+      <a class="menu-item" data-page="votes"><i class="fas fa-vote-yea"></i> Votes</a>
+      <a class="menu-item" data-page="voters"><i class="fas fa-user-friends"></i> Voters</a>
+      <a class="menu-item" data-page="transactions"><i class="fas fa-receipt"></i> Transactions</a>
+      <a class="menu-item" data-page="wallet"><i class="fas fa-wallet"></i> Wallet</a>
+      <a class="menu-item" data-page="settings"><i class="fas fa-cog"></i> Settings</a>
+    </nav>
+    <div class="sidebar-footer">
+      <button id="logoutBtn" class="btn-logout"><i class="fas fa-sign-out-alt"></i> Sign Out</button>
+    </div>
+  </aside>
+
+  <!-- MAIN -->
+  <main class="main">
+    <header class="topbar">
+      <div>
+        <h2 id="pageTitle">Dashboard</h2>
+        <p class="crumb" id="pageCrumb">Overview of your awards platform</p>
+      </div>
+      <div class="topbar-right">
+        <div class="live-chip" id="liveChip" title="Realtime updates"><span class="live-dot"></span> LIVE</div>
+        <div class="user-chip"><i class="fas fa-user-shield"></i> <span id="adminUser">admin</span></div>
+      </div>
+    </header>
+
+    <!-- DASHBOARD -->
+    <section id="page-dashboard" class="page active">
+      <div class="stats-grid">
+        <div class="stat-card gradient-1"><div class="stat-icon"><i class="fas fa-users"></i></div><div><div class="stat-value" id="s-nominees">0</div><div class="stat-label">Total Nominees</div></div></div>
+        <div class="stat-card gradient-2"><div class="stat-icon"><i class="fas fa-vote-yea"></i></div><div><div class="stat-value" id="s-votes">0</div><div class="stat-label">Total Votes</div></div></div>
+        <div class="stat-card gradient-3"><div class="stat-icon"><i class="fas fa-money-bill-wave"></i></div><div><div class="stat-value" id="s-wallet">KES 0</div><div class="stat-label">Wallet Balance (Realtime)</div></div></div>
+        <div class="stat-card gradient-4"><div class="stat-icon"><i class="fas fa-calendar-day"></i></div><div><div class="stat-value" id="s-days">30</div><div class="stat-label">Days Left</div></div></div>
+        <div class="stat-card gradient-5"><div class="stat-icon"><i class="fas fa-check-circle"></i></div><div><div class="stat-value" id="s-success">0</div><div class="stat-label">Successful Tx</div></div></div>
+        <div class="stat-card gradient-6"><div class="stat-icon"><i class="fas fa-hourglass-half"></i></div><div><div class="stat-value" id="s-pending">0</div><div class="stat-label">Pending Tx</div></div></div>
+        <div class="stat-card gradient-7"><div class="stat-icon"><i class="fas fa-times-circle"></i></div><div><div class="stat-value" id="s-failed">0</div><div class="stat-label">Failed Tx</div></div></div>
+        <div class="stat-card gradient-8"><div class="stat-icon"><i class="fas fa-trophy"></i></div><div><div class="stat-value" id="s-categories">9</div><div class="stat-label">Categories</div></div></div>
+      </div>
+
+      <div class="grid-2">
+        <div class="panel">
+          <h3><i class="fas fa-toggle-on"></i> Quick Controls</h3>
+          <div class="switch-row">
+            <div><b>Registration Open</b><p class="muted">Nominees can register</p></div>
+            <label class="switch"><input type="checkbox" id="tglRegistration"><span></span></label>
+          </div>
+          <div class="switch-row">
+            <div><b>Voting Active</b><p class="muted">Voters can cast votes</p></div>
+            <label class="switch"><input type="checkbox" id="tglVoting"><span></span></label>
+          </div>
+        </div>
+
+        <div class="panel">
+          <h3><i class="fas fa-crown"></i> Top Nominees</h3>
+          <div id="topNominees" class="top-list"><p class="muted">Loading...</p></div>
+        </div>
+      </div>
+
+      <div class="panel" style="margin-top:20px">
+        <h3><i class="fas fa-bolt"></i> Realtime Transaction Feed</h3>
+        <div id="realtimeFeed" class="realtime-feed"><p class="muted">Waiting for new transactions...</p></div>
+      </div>
+    </section>
+
+    <!-- NOMINEES -->
+    <section id="page-nominees" class="page">
+      <div class="panel">
+        <div class="panel-head">
+          <h3><i class="fas fa-users"></i> All Nominees</h3>
+          <input type="text" id="nomineeSearch" class="search-input" placeholder="Search by name, category...">
+        </div>
+        <div class="table-wrap">
+          <table class="data-table">
+            <thead><tr>
+              <th>Name</th><th>Category</th><th>University</th><th>Phone</th><th>Votes</th><th>Actions</th>
+            </tr></thead>
+            <tbody id="nomineesTable"></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- VOTES -->
+    <section id="page-votes" class="page">
+      <div class="panel">
+        <h3><i class="fas fa-vote-yea"></i> All Votes</h3>
+        <div class="table-wrap">
+          <table class="data-table">
+            <thead><tr><th>Time</th><th>Nominee</th><th>Amount</th><th>Phone</th><th>Status</th><th>Transaction ID</th></tr></thead>
+            <tbody id="votesTable"></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- VOTERS -->
+    <section id="page-voters" class="page">
+      <div class="panel">
+        <h3><i class="fas fa-user-friends"></i> Voters</h3>
+        <div class="table-wrap">
+          <table class="data-table">
+            <thead><tr><th>Phone</th><th>Total Votes</th><th>Total Amount (KES)</th><th>Last Vote</th></tr></thead>
+            <tbody id="votersTable"></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- TRANSACTIONS -->
+    <section id="page-transactions" class="page">
+      <div class="panel">
+        <h3><i class="fas fa-receipt"></i> KCB Callback Log</h3>
+        <div id="txList"></div>
+      </div>
+    </section>
+
+    <!-- WALLET -->
+    <section id="page-wallet" class="page">
+      <div class="wallet-hero">
+        <div><span class="muted">Available Balance (Realtime)</span><h1 id="walletBig">KES 0</h1><p class="muted">Auto-updates on every successful vote transaction</p></div>
+        <div class="wallet-stat"><div class="muted">Successful Votes</div><h2 id="walletSuccess">0</h2></div>
+      </div>
+      <div class="panel">
+        <h3><i class="fas fa-history"></i> Recent Wallet Activity</h3>
+        <div id="walletActivity" class="realtime-feed"><p class="muted">Recent successful transactions will appear here...</p></div>
+      </div>
+      <div class="panel">
+        <h3><i class="fas fa-pen"></i> Manual Adjustment</h3>
+        <div class="form-row">
+          <input type="number" id="walletSetTo" placeholder="Set new balance">
+          <button class="btn-primary" id="btnSetWallet"><i class="fas fa-save"></i> Update</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- SETTINGS -->
+    <section id="page-settings" class="page">
+      <div class="panel">
+        <h3><i class="fas fa-cog"></i> Registration Period</h3>
+        <div class="form-row">
+          <label>Total Days<input type="number" id="setDays" min="1"></label>
+          <label>Start Date<input type="date" id="setStart"></label>
+          <button class="btn-primary" id="btnSaveDays"><i class="fas fa-save"></i> Save</button>
+        </div>
+        <div class="form-row">
+          <button class="btn-secondary" id="btnResetDays"><i class="fas fa-redo"></i> Reset to Today + 30 Days</button>
+        </div>
+      </div>
+
+      <div class="panel danger">
+        <h3><i class="fas fa-exclamation-triangle"></i> Platform State</h3>
+        <div class="switch-row"><div><b>Registration Open</b></div><label class="switch"><input type="checkbox" id="setRegOpen"><span></span></label></div>
+        <div class="switch-row"><div><b>Voting Active</b></div><label class="switch"><input type="checkbox" id="setVotingActive"><span></span></label></div>
+        <button class="btn-primary" id="btnSaveState"><i class="fas fa-save"></i> Save State</button>
+      </div>
+
+      <div class="panel">
+        <h3><i class="fas fa-link"></i> KCB Callback URL</h3>
+        <p class="muted">Configure this URL in your KCB Buni portal to receive payment confirmations:</p>
+        <div class="callback-url" id="cbUrl">https://kenyacumpustourbackend.onrender.com/callback</div>
+      </div>
+    </section>
+  </main>
+</div>
+
+<!-- Toast -->
+<div id="toast" class="toast"></div>
+
+<script src="admin.js"></script>
+</body>
+</html>
